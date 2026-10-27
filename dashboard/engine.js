@@ -3,7 +3,7 @@
  * No orders are ever sent to an exchange: fills are simulated at the live
  * bid/ask with slippage and fees, so results stay honest and reproducible.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import { AGENTS, consensus } from './agents.js';
 
@@ -20,7 +20,9 @@ const CFG = {
   maxEquity: 2880,    // ~48h at 1 point / minute
 };
 
-export function createEngine({ feed, symbols, statePath }) {
+const CSV_HEADER = 'open_time,close_time,symbol,qty,entry_price,exit_price,fees,pnl,pnl_pct,reason\n';
+
+export function createEngine({ feed, symbols, statePath, tradesPath }) {
   const fresh = () => ({
     startedAt: Date.now(), cycle: 0, cash: CFG.startBalance, initial: CFG.startBalance,
     feesPaid: 0, positions: {}, trades: [], equity: [], log: [], agents: [], comms: 'waiting for first cycle',
@@ -46,7 +48,7 @@ export function createEngine({ feed, symbols, statePath }) {
     const fee = budget * CFG.feePct / 100;
     const qty = (budget - fee) / px;
     s.cash -= budget; s.feesPaid += fee;
-    s.positions[sym] = { qty, entry: px, bars: 0, cost: budget };
+    s.positions[sym] = { qty, entry: px, bars: 0, cost: budget, feeIn: fee, openedAt: Date.now() };
     log('EXEC', `BUY ${qty.toPrecision(5)} ${sym} @ ${px.toFixed(px < 1 ? 5 : 2)} · ${why}`);
   }
 
@@ -58,6 +60,15 @@ export function createEngine({ feed, symbols, statePath }) {
     s.cash += gross - fee; s.feesPaid += fee;
     delete s.positions[sym];
     s.trades.push({ t: Date.now(), sym, pnl, win: pnl > 0 });
+    if (tradesPath) {
+      mkdirSync(dirname(tradesPath), { recursive: true });
+      if (!existsSync(tradesPath)) writeFileSync(tradesPath, CSV_HEADER);
+      const iso = (t) => new Date(t).toISOString();
+      appendFileSync(tradesPath, [
+        iso(p.openedAt ?? Date.now()), iso(Date.now()), sym, p.qty, p.entry, px,
+        (p.feeIn ?? 0) + fee, pnl.toFixed(4), (pnl / p.cost * 100).toFixed(3), why.replace(/,/g, ';'),
+      ].join(',') + '\n');
+    }
     log('FILL', `SOLD ${sym} ${pnl >= 0 ? '+' : '-'}$${Math.abs(pnl).toFixed(2)} · ${why}`);
   }
 

@@ -11,7 +11,7 @@ import { createEngine } from './engine.js';
 
 const dir = (f) => fileURLToPath(new URL(f, import.meta.url));
 const symbols = (process.env.SYMBOLS || 'BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT').split(',');
-const engine = createEngine({ feed: bitgetFeed, symbols, statePath: dir('data/state.json') });
+const engine = createEngine({ feed: bitgetFeed, symbols, statePath: dir('data/state.json'), tradesPath: dir('data/trades.csv') });
 
 let exchangeUsdt = null;
 const tick = async () => {

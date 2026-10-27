@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'fs';
+import { mkdtempSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createEngine } from '../dashboard/engine.js';
@@ -42,4 +42,18 @@ test('engine keeps accounting consistent and pays fees', async () => {
   assert.ok(s.feesPaid > 0, 'fees must be charged on every fill');
   assert.ok(s.balance > 0 && Number.isFinite(s.pnl));
   assert.equal(s.wins + s.losses, s.trades);
+});
+
+test('every closed trade is journaled to CSV and sums to the engine P&L', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dash-'));
+  const tradesPath = join(dir, 'trades.csv');
+  const engine = createEngine({ feed: fakeFeed(0.0001), symbols: ['TESTUSDT'], statePath: join(dir, 's.json'), tradesPath });
+  for (let i = 0; i < 80; i++) await engine.cycle();
+  const [head, ...rows] = readFileSync(tradesPath, 'utf8').trim().split('\n');
+  assert.equal(head.split(',').length, 10);
+  const s = engine.snapshot();
+  assert.equal(rows.length, s.trades);
+  const total = rows.reduce((a, r) => a + +r.split(',')[7], 0);
+  const closedPnl = s.balance - s.initial; // no open position is assumed at the last cycle
+  assert.ok(Math.abs(total - closedPnl) < 5, `csv ${total} vs engine ${closedPnl}`);
 });
