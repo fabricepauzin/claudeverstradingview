@@ -27,6 +27,7 @@ export function createEngine({ feed, symbols, statePath }) {
   });
   let s = existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : fresh();
 
+  const lastScan = {};
   const log = (tag, msg) => {
     s.log.unshift({ t: Date.now(), tag, msg });
     s.log.length = Math.min(s.log.length, CFG.maxLog);
@@ -83,10 +84,11 @@ export function createEngine({ feed, symbols, statePath }) {
         } else if (c.enter) {
           open(sym, tk, `${c.bull}/${AGENTS.length} agents bullish`);
         }
-        s.comms = c.veto
+        const comms = c.veto
           ? `${c.veto} veto on ${sym}`
           : `${sym}: ${c.bull} bull / ${c.bear} bear → ${c.enter ? 'ENTER' : 'hold'}`;
-        log('SCAN', s.comms);
+        if (comms !== lastScan[sym]) log('SCAN', comms); // skip repeats so fills stay visible
+        lastScan[sym] = s.comms = comms;
       } catch (e) {
         log('WARN', `${sym} feed error: ${e.message}`);
       }
