@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trading Bot Dashboard</title>
+<style>
+:root{--bg:#eef0f4;--card:#fff;--ink:#14171f;--mute:#8a90a0;--line:#e3e6ec;--up:#12a15a;--down:#d6336c;--acc:#1a9bd7}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1218;--card:#181c25;--ink:#e8eaf0;--mute:#7c8395;--line:#262b37}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:13px ui-monospace,Menlo,Consolas,monospace}
+main{max-width:1100px;margin:0 auto;padding:16px}
+header{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;margin-bottom:12px}
+h1{font-size:16px;margin:0;letter-spacing:.08em}h1 span{color:var(--mute);font-weight:400}
+.badge{font-size:10px;padding:2px 6px;border-radius:4px;background:var(--acc);color:#fff;margin-left:6px}
+.meta{color:var(--mute);font-size:11px}.meta b{color:var(--ink);margin-right:10px}
+.grid{display:grid;gap:12px}.stats{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.mid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);margin-top:12px}
+@media(max-width:760px){.mid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}
+.lbl{font-size:10px;color:var(--mute);letter-spacing:.1em;text-transform:uppercase}
+.val{font-size:26px;font-weight:700;margin:6px 0 2px}.sub{font-size:10px;color:var(--mute)}
+.up{color:var(--up)}.down{color:var(--down)}
+#chart{width:100%;height:240px;display:block}
+#log{height:240px;overflow:auto;font-size:11px;line-height:1.7}
+#log div{white-space:nowrap}.t-FILL{color:var(--acc)}.t-EXEC{color:var(--up)}.t-SCAN{color:var(--mute)}.t-WARN{color:var(--down)}
+.comms{margin-top:12px;font-size:11px;color:var(--mute)}.comms b{color:var(--acc)}
+.agents{margin-top:8px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.agent .n{font-weight:700;letter-spacing:.1em}.agent .v{margin-top:4px;font-size:11px}
+.agent{border-top:3px solid var(--mute)}.agent.bull{border-top-color:var(--up)}.agent.bear{border-top-color:var(--down)}.agent.veto{border-top-color:#e8a317}
+footer{margin-top:12px;font-size:10px;color:var(--mute)}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>TRADING BOT <span>/ <span id="mode">…</span></span><span class="badge" id="src">…</span></h1>
+  <div class="meta"><b>UPTIME <span id="up">–</span></b><b>CYCLE #<span id="cy">–</span></b><b>PID <span id="pid">–</span></b></div>
+</header>
+
+<section class="grid stats">
+  <div class="card"><div class="lbl">Balance (équité)</div><div class="val" id="bal">–</div><div class="sub" id="init"></div></div>
+  <div class="card"><div class="lbl">P&amp;L total</div><div class="val" id="pnl">–</div><div class="sub" id="pnlpct"></div></div>
+  <div class="card"><div class="lbl">Frais payés</div><div class="val" id="fees">–</div><div class="sub" id="feecfg"></div></div>
+  <div class="card"><div class="lbl">Win rate</div><div class="val" id="wr">–</div><div class="sub" id="wl"></div></div>
+</section>
+
+<section class="grid mid">
+  <div class="card"><div class="lbl">Historique de l'équité</div><svg id="chart" viewBox="0 0 600 240" preserveAspectRatio="none"></svg></div>
+  <div class="card"><div class="lbl">Journal d'activité</div><div id="log"></div></div>
+</section>
+
+<div class="comms card">// AGENT COMMS · <b id="comms">–</b> · <span id="exch"></span></div>
+<section class="grid agents" id="agents"></section>
+<footer>Simulation (paper trading) sur prix réels. Aucun ordre n'est envoyé à un exchange. Pas un conseil financier.</footer>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const usd = (n) => (n < 0 ? '-' : '') + '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const dur = (s) => { s = Math.floor(s); return `${Math.floor(s / 3600)}h${String(Math.floor(s % 3600 / 60)).padStart(2, '0')}m`; };
+
+function drawChart(eq) {
+  const svg = $('chart');
+  if (eq.length < 2) { svg.innerHTML = '<text x="300" y="120" text-anchor="middle" fill="#8a90a0">en attente de données…</text>'; return; }
+  const ys = eq.map((p) => p[1]), lo = Math.min(...ys), hi = Math.max(...ys), pad = (hi - lo || 1) * 0.1;
+  const X = (i) => (i / (eq.length - 1)) * 580 + 10, Y = (v) => 230 - ((v - lo + pad) / (hi - lo + 2 * pad)) * 220;
+  const pts = eq.map((p, i) => `${X(i).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(' ');
+  const up = ys.at(-1) >= ys[0], col = up ? '#12a15a' : '#d6336c';
+  svg.innerHTML = `<polygon points="10,230 ${pts} 590,230" fill="${col}" opacity=".12"/>
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    <text x="8" y="14" fill="#8a90a0" font-size="11">${usd(hi)}</text><text x="8" y="236" fill="#8a90a0" font-size="11">${usd(lo)}</text>`;
+}
+
+async function refresh() {
+  try {
+    const d = await (await fetch('/api/state')).json();
+    $('mode').textContent = d.mode; $('src').textContent = d.source;
+    $('up').textContent = dur(d.uptime); $('cy').textContent = d.cycle; $('pid').textContent = d.pid;
+    $('bal').textContent = usd(d.balance); $('init').textContent = 'initial: ' + usd(d.initial);
+    $('pnl').textContent = (d.pnl >= 0 ? '+' : '') + usd(d.pnl); $('pnl').className = 'val ' + (d.pnl >= 0 ? 'up' : 'down');
+    $('pnlpct').textContent = (d.pnlPct >= 0 ? '+' : '') + d.pnlPct.toFixed(2) + '%';
+    $('fees').textContent = usd(d.feesPaid); $('feecfg').textContent = `${d.cfg.feePct}% / ordre + slippage ${d.cfg.slipPct}%`;
+    $('wr').textContent = d.winRate == null ? '–' : d.winRate.toFixed(1) + '%';
+    $('wl').textContent = `${d.wins}W / ${d.losses}L · ${d.symbols.join(' ')}`;
+    drawChart(d.equity);
+    $('log').innerHTML = d.log.map((l) => `<div class="t-${l.tag}">[${l.tag}] ${esc(l.msg)}</div>`).join('');
+    $('comms').textContent = d.comms;
+    $('exch').textContent = d.exchangeUsdt == null ? '' : 'solde réel exchange (lecture seule): ' + usd(d.exchangeUsdt) + ' USDT';
+    $('agents').innerHTML = d.agents.map((a) => {
+      const cls = a.veto ? 'veto' : a.vote > 0 ? 'bull' : a.vote < 0 ? 'bear' : '';
+      const v = a.veto ? 'VETO' : a.vote > 0 ? 'BULL' : a.vote < 0 ? 'BEAR' : 'NEUTRAL';
+      return `<div class="card agent ${cls}"><div class="n">${a.name}</div><div class="lbl">${a.role}</div><div class="v">${v} · ${esc(a.note)}</div></div>`;
+    }).join('');
+  } catch { $('comms').textContent = 'serveur injoignable'; }
+}
+refresh(); setInterval(refresh, 2000);
+</script>
+</body>
+</html>
