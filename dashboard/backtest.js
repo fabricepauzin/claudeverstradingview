@@ -1,6 +1,6 @@
 /**
  * Replay historical 1m candles through the same engine used live.
- *   node dashboard/backtest.js candles.json [SYMBOL]
+ *   node dashboard/backtest.js candles.json [SYMBOL] [DIGITS]
  * Accepts Bitget-style arrays or MT5 objects ({time,open,high,low,close,tickVolume,spread}).
  * Spread, when present, is applied around the close; fees and slippage come from engine.js.
  */
@@ -9,10 +9,10 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { createEngine } from './engine.js';
 
-const [file, symbol = 'SIM'] = process.argv.slice(2);
+const [file, symbol = 'SIM', digits = 2] = process.argv.slice(2); // digits: price decimals, MT5 spread is in points
 const bars = JSON.parse(readFileSync(file, 'utf8')).map((r) => ({
   t: Date.parse(r.time), o: r.open, h: r.high, l: r.low, c: r.close, v: r.tickVolume ?? r.volume,
-  half: (r.spread ?? 0) / 100 / 2, // MT5 spread in points, 2 digits
+  half: (r.spread ?? 0) * 10 ** -digits / 2,
 }));
 
 let i = 100;
@@ -24,13 +24,16 @@ const feed = {
   },
 };
 const engine = createEngine({ feed, symbols: [symbol], statePath: join(mkdtempSync(join(tmpdir(), 'bt-')), 's.json') });
-for (; i < bars.length - 1; i++) await engine.cycle();
+let peak = 1, dd = 0; // drawdown tracked here: the engine only keeps the last 48h of equity
+for (; i < bars.length - 1; i++) {
+  await engine.cycle();
+  const { balance, initial } = engine.snapshot();
+  peak = Math.max(peak, balance / initial);
+  dd = Math.min(dd, (balance / initial / peak - 1) * 100);
+}
 
 const s = engine.snapshot();
 const hold = (bars[bars.length - 2].c / bars[100].c - 1) * 100;
-const eq = s.equity.map((e) => e[1]);
-let peak = eq[0], dd = 0;
-for (const v of eq) { peak = Math.max(peak, v); dd = Math.min(dd, (v / peak - 1) * 100); }
 console.log(JSON.stringify({
   bars: bars.length - 101, from: new Date(bars[100].t).toISOString(), to: new Date(bars[bars.length - 2].t).toISOString(),
   trades: s.trades, wins: s.wins, losses: s.losses, winRatePct: s.winRate && +s.winRate.toFixed(1),
